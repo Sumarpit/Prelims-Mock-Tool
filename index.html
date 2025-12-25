@@ -910,12 +910,19 @@
         questions.forEach((q, i) => {
             const ans = responses[i]; const userConf = confidence[i] || 'None';
             let cls = 'skip', uAns = 'Skipped', status = 'Skipped';
+            
+            // --- FIX: SAFE TEXT EXTRACTION ---
+            let correctText = (q.options && q.options[q.answer]) ? q.options[q.answer] : "Correct option not detected";
+            
             if(ans !== undefined) {
-                if(ans === q.answer) { cls='correct'; uAns=q.options[ans]; status='Correct'; }
-                else { cls='wrong'; uAns=q.options[ans]; status='Wrong'; }
+                if(ans === q.answer) { cls='correct'; uAns=correctText; status='Correct'; }
+                else { 
+                    cls='wrong'; 
+                    uAns = (q.options && q.options[ans]) ? q.options[ans] : "Unknown Option"; 
+                    status='Wrong'; 
+                }
             }
             
-            // Format Explanation with HTML breaks for display in result
             let formattedExp = q.explanation ? q.explanation.replace(/\n/g, '<br>') : "No explanation";
 
             rev.innerHTML += `
@@ -927,7 +934,7 @@
                     <div style="margin-bottom:10px; font-size:1.05rem;">${q.question || q.text}</div>
                     <div style="font-size:0.95rem;">
                         You: <b>${uAns}</b> <br>
-                        Ans: <span class="txt-green">${q.options[q.answer]}</span>
+                        Ans: <span class="txt-green">${correctText}</span>
                     </div>
                     <div style="margin-top:10px; padding:10px; background:#f9f9f9; font-size:0.9rem; border-radius:4px;">
                         <b>Exp:</b> ${formattedExp}
