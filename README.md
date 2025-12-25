@@ -9,7 +9,7 @@ A clean, web-based mock test tool designed for UPSC CSE Prelims.
 
 ## How to Add a Test
 1. Go to the `uploads/` folder in this repository.
-2. Upload your **Forum IAS SFG PDF**.
+2. Upload your ** PDF**.
 3. Wait 30 seconds for the GitHub Action to run.
 4. Refresh the app (or `index.html`) and check the **Cloud** tab.
 5. 
