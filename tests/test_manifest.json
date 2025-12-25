@@ -1,10 +1,3 @@
 [
-  {
-    "name": "SFG 2026 Level 1 Test 1",
-    "filename": "SFG-2026-Level-1-Test-1.json"
-  },
-  {
-    "name": "SFG Sol 3",
-    "filename": "SFG Sol 3.json"
-  }
+{"name": "SFG-2026-Level-1-Test-1", "filename": "SFG-2026-Level-1-Test-1.json", "qCount": 0}
 ]
