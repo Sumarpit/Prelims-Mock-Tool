@@ -14,87 +14,118 @@ def extract_text_from_pdf(pdf_path):
         with open(pdf_path, 'rb') as f:
             reader = PyPDF2.PdfReader(f)
             for page in reader.pages:
-                text += page.extract_text() + "\n"
+                page_text = page.extract_text()
+                # Remove Page Numbers (e.g., [24], [1], --- PAGE 2 ---)
+                page_text = re.sub(r'\[\d+\]', '', page_text)
+                page_text = re.sub(r'---\s*PAGE\s*\d+\s*---', '', page_text)
+                text += page_text + "\n"
     except Exception as e:
         print(f"❌ Error reading {pdf_path}: {e}")
     return text
 
+def clean_garbage_text(text):
+    """Removes the repetitive header/footer text found in Forum IAS PDFs."""
+    
+    # 1. Remove the long address/contact footer
+    # Matches "Forum Learning Centre : Delhi ... helpdesk@forumias.academy"
+    address_pattern = r'Forum\s+Learning\s+Centre\s*:.*?(?:helpdesk@forumias\.academy|admissions@forumias\.academy)'
+    text = re.sub(address_pattern, '', text, flags=re.IGNORECASE | re.DOTALL)
+
+    # 2. Remove the Test Code Header
+    # Matches "SFG 2026 | Level 1 | Test - #1 ... Test Code: 321101"
+    header_pattern = r'SFG\s+2026\s*\|\s*Level\s+\d+\s*\|\s*Test.*?(?:Forum\s*IAS|ForumIAS)'
+    text = re.sub(header_pattern, '', text, flags=re.IGNORECASE)
+
+    return text
+
+def format_explanation(text):
+    """
+    Inserts HTML formatting into the raw explanation text to improve readability.
+    """
+    if not text: return "No explanation provided."
+
+    # 1. Bold specific keywords and add line breaks before them
+    keywords = [
+        "Statement I is correct", "Statement II is correct", 
+        "Statement 1 is correct", "Statement 2 is correct",
+        "Statement I is incorrect", "Statement II is incorrect",
+        "Statement 1 is incorrect", "Statement 2 is incorrect",
+        "Hence option .*? is correct", "Thus,", "Therefore,"
+    ]
+    
+    for kw in keywords:
+        # (?i) makes it case insensitive
+        # We replace "Statement..." with "<br><br><b>Statement...</b>"
+        pattern = f"(?i)({kw})"
+        text = re.sub(pattern, r'<br><br><b>\1</b>', text)
+
+    # 2. Handle numbered lists in explanations (e.g., "1. It is a... 2. It is b...")
+    # Look for a number followed by a dot and a space, preceded by whitespace
+    text = re.sub(r'\n\s*(\d+\.)\s+', r'<br><b>\1</b> ', text)
+
+    # 3. Clean up multiple <br>
+    text = text.replace('<br><br><br>', '<br><br>')
+    
+    return text
+
 def parse_forum_ias(text):
+    # Step 1: Clean the noise globally
+    text = clean_garbage_text(text)
+    
     questions = []
     
     # Split by "Q.<number>)" or "Q.<number>."
-    # The regex looks for a newline followed by Q, dot/space, digits, then ) or .
     blocks = re.split(r'\nQ\.\s*\d+[\)\.]', text)
     
-    # Skip the first split if it's junk (usually header text before Q1)
     if len(blocks) > 0:
         blocks = blocks[1:]
 
     for idx, block in enumerate(blocks):
         try:
-            # 1. CLEANUP
             block = block.strip()
             
-            # 2. EXTRACT ANSWER
-            # Pattern: matches "Ans) c" or "Ans) C" or "Answer: c"
+            # EXTRACT ANSWER
             ans_match = re.search(r'(?:Ans|Answer)[\)\:]\s*([a-dA-D])', block)
             correct_char = ans_match.group(1).lower() if ans_match else None
-            
-            # Map 'a'->0, 'b'->1 etc.
             ans_map = {'a': 0, 'b': 1, 'c': 2, 'd': 3}
             correct_idx = ans_map.get(correct_char, -1)
 
-            # 3. EXTRACT METADATA (Subject/Topic)
-            # Pattern in PDF: "Subject:) Polity"
+            # EXTRACT METADATA
             subj_match = re.search(r'Subject:\)\s*(.*)', block)
             subject = subj_match.group(1).strip() if subj_match else "General"
 
-            # Pattern in PDF: "Topic:) ... "
             topic_match = re.search(r'Topic:\)\s*(.*)', block)
             topic = topic_match.group(1).strip() if topic_match else "GS"
 
-            # 4. EXTRACT EXPLANATION
-            # Usually starts with "Exp)" or "Explanation" and goes to end or next metadata
+            # EXTRACT EXPLANATION
             exp_match = re.search(r'(?:Exp|Explanation)[\)\:]\s*(.*)', block, re.DOTALL | re.IGNORECASE)
-            explanation = exp_match.group(1).strip() if exp_match else "No explanation found."
-
-            # Remove Metadata lines from explanation if they got caught
+            explanation = exp_match.group(1).strip() if exp_match else ""
+            
+            # Clean metadata from explanation
             explanation = re.sub(r'(Subject:\)|Topic:\)|Source:\)).*', '', explanation, flags=re.DOTALL).strip()
+            
+            # --- APPLY FORMATTING TO EXPLANATION ---
+            explanation = format_explanation(explanation)
 
-            # 5. EXTRACT QUESTION TEXT & OPTIONS
-            # Everything before "a)" is usually Question Text
-            # We split by options a), b), c), d)
-            
-            # A rough splitter for options. 
-            # Note: Forum IAS options are usually "a) ... b) ... "
-            # We look for the options block start
+            # EXTRACT QUESTION TEXT & OPTIONS
             opt_start = re.search(r'\n\s*a[\)\.]', block)
-            
             q_text = ""
             options = []
             
             if opt_start:
                 q_text = block[:opt_start.start()].strip()
-                
-                # Extract options string
-                # We limit the search area to before the Answer/Explanation starts
                 end_of_opts = ans_match.start() if ans_match else len(block)
                 opts_block = block[opt_start.start():end_of_opts]
                 
-                # Regex to grab a)... b)... c)... d)...
-                # This is tricky because options might span lines.
-                # We simply find the start of a), b), c), d) and slice.
                 opt_matches = list(re.finditer(r'(?:^|\n)\s*([a-dA-D])[\)\.]', opts_block))
-                
                 for i in range(len(opt_matches)):
                     start = opt_matches[i].end()
                     end = opt_matches[i+1].start() if i + 1 < len(opt_matches) else len(opts_block)
                     options.append(opts_block[start:end].strip())
             else:
                 q_text = "Error parsing question text."
-                options = ["Parse Error", "Parse Error", "Parse Error", "Parse Error"]
+                options = ["Error", "Error", "Error", "Error"]
 
-            # 6. BUILD OBJECT
             q_obj = {
                 "id": idx + 1,
                 "text": q_text,
@@ -120,7 +151,6 @@ def update_manifest(filename, test_name):
         except:
             manifest = []
 
-    # Check if exists, update if so
     found = False
     for entry in manifest:
         if entry['filename'] == filename:
@@ -136,10 +166,8 @@ def update_manifest(filename, test_name):
 
 def main():
     if not os.path.exists(UPLOAD_DIR):
-        print(f"Directory {UPLOAD_DIR} missing. Creating...")
         os.makedirs(UPLOAD_DIR)
         return
-
     if not os.path.exists(TESTS_DIR):
         os.makedirs(TESTS_DIR)
 
@@ -155,9 +183,7 @@ def main():
                     json.dump(questions, out_f, indent=2)
                 
                 update_manifest(out_name, f.replace('.pdf', '').replace('-', ' '))
-                print(f"✅ Generated {out_name} with {len(questions)} questions.")
-                
-                # Clean up upload so it doesn't re-process
+                print(f"✅ Generated {out_name}")
                 os.remove(os.path.join(UPLOAD_DIR, f))
 
 if __name__ == "__main__":
